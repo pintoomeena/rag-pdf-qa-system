@@ -16,7 +16,7 @@ from services.vector_store import (
 )
 from services.llm_service import generate_answer
 
-app = FastAPI(debug=True)
+app = FastAPI()
 
 UPLOAD_DIR = "uploads"
 
