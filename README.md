@@ -19,7 +19,7 @@ Users can:
 - Sentence Transformers
 - ChromaDB
 - HuggingFace Transformers
-- PyPDF
+- PyMuPDF (fitz)
 - Python
 
 ---
