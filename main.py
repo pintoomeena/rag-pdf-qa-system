@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse
 from typing import List
 import os
+
 from services.parser import extract_text_from_pdf
 from services.chunking import chunk_text
 
@@ -14,6 +15,7 @@ from services.vector_store import (
     store_embeddings,
     retrieve_relevant_chunks
 )
+
 from services.llm_service import generate_answer
 
 app = FastAPI()
@@ -88,6 +90,32 @@ async def upload_documents(
         "message": "Files uploaded successfully",
         "files": uploaded_files
     }
+
+
+@app.get("/test-upload", response_class=HTMLResponse)
+def test_upload_page():
+
+    return """
+    <html>
+        <body>
+
+            <h2>Upload PDF</h2>
+
+            <form action="/upload/"
+                  enctype="multipart/form-data"
+                  method="post">
+
+                <input name="files"
+                       type="file"
+                       multiple>
+
+                <input type="submit">
+
+            </form>
+
+        </body>
+    </html>
+    """
 
 
 @app.get("/query/")
