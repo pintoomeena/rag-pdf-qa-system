@@ -1,10 +1,9 @@
 
-from dotenv import load_dotenv
-
-load_dotenv()
+import os
 from pathlib import Path
 from typing import List
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -20,10 +19,18 @@ from services.vector_store import (
 )
 from services.llm_service import generate_answer
 
+
+# Load the .env file from the project root.
+PROJECT_DIR = Path(__file__).resolve().parent
+load_dotenv(PROJECT_DIR / ".env")
+
 app = FastAPI(title="RAG PDF QA API")
 
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = PROJECT_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+MAX_FILES = 20
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB per PDF
 
 
 @app.get("/")
@@ -34,28 +41,32 @@ def home():
 @app.post("/upload/")
 async def upload_documents(files: List[UploadFile] = File(...)):
     if not files:
-        raise HTTPException(status_code=400, detail="Upload at least one PDF.")
-
-    if len(files) > 20:
         raise HTTPException(
             status_code=400,
-            detail="Maximum 20 files allowed.",
+            detail="Upload at least one PDF.",
+        )
+
+    if len(files) > MAX_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_FILES} files allowed per request.",
         )
 
     uploaded_files = []
 
     for file in files:
-        if not file.filename or Path(file.filename).suffix.lower() != ".pdf":
+        safe_name = Path(file.filename or "").name
+
+        if not safe_name or Path(safe_name).suffix.lower() != ".pdf":
             raise HTTPException(
                 status_code=400,
                 detail="Only PDF files are allowed.",
             )
 
-        safe_name = Path(file.filename).name
-        file_path = UPLOAD_DIR / safe_name
+        file_path = None
 
         try:
-            content = await file.read()
+            content = await file.read(MAX_FILE_SIZE + 1)
 
             if not content:
                 raise HTTPException(
@@ -63,9 +74,21 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                     detail=f"{safe_name} is empty.",
                 )
 
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{safe_name} exceeds the 20 MB limit.",
+                )
+
+            # Use a unique name to avoid overwriting files with the same name.
+            import uuid
+
+            stored_name = f"{uuid.uuid4().hex}_{safe_name}"
+            file_path = UPLOAD_DIR / stored_name
             file_path.write_bytes(content)
 
             text = extract_text_from_pdf(str(file_path))
+
             if not text or not text.strip():
                 raise HTTPException(
                     status_code=422,
@@ -76,6 +99,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 )
 
             chunks = chunk_text(text)
+
             if not chunks:
                 raise HTTPException(
                     status_code=422,
@@ -83,17 +107,27 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 )
 
             embeddings = generate_embeddings(chunks)
-            store_embeddings(chunks, embeddings)
 
+            if len(embeddings) != len(chunks):
+                raise RuntimeError(
+                    "The number of generated embeddings does not match "
+                    "the number of text chunks."
+                )
+
+            store_embeddings(chunks, embeddings)
             uploaded_files.append(safe_name)
 
         except HTTPException:
             raise
-        except Exception as exc:
+        except Exception:
+            # Log the full traceback on the server, not in the API response.
+            import logging
+            logging.exception("Failed to process uploaded PDF: %s", safe_name)
+
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to process {safe_name}: {exc}",
-            ) from exc
+                detail=f"Failed to process {safe_name}. Check backend logs.",
+            )
         finally:
             await file.close()
 
@@ -140,9 +174,11 @@ def query_documents(question: str):
                 "relevant_chunks": [],
             }
 
-        context = "\n\n".join(results)
+        context = "\n\n".join(
+            item if isinstance(item, str) else str(item)
+            for item in results
+        )
 
-        # Gemini function signature: generate_answer(context, question)
         answer = generate_answer(context, question)
 
         return {
@@ -153,8 +189,11 @@ def query_documents(question: str):
 
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
+        import logging
+        logging.exception("Failed to answer question")
+
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to answer question: {exc}",
-        ) from exc
+            detail="Failed to answer question. Check backend logs.",
+        )
