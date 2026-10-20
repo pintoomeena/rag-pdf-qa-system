@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+sentence-transformers
+chromadb
+pypdf
+transformers==4.41.2
+torch
+sentencepiece
+python-dotenv
+huggingface_hub
