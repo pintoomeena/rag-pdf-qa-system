@@ -2,29 +2,50 @@ from transformers import pipeline
 
 generator = pipeline(
     task="text2text-generation",
-    model="google/flan-t5-base",
+    model="google/flan-t5-large",
     framework="pt"
 )
 
 
-def generate_answer(
-    question,
-    context
-):
+def generate_answer(question, context):
+    if not context or not context.strip():
+        return "I couldn't find enough information in the document."
 
     prompt = f"""
-    Context:
-    {context}
+Answer the question directly using only the provided context.
 
-    Question:
-    {question}
+Instructions:
+- Start immediately with the answer.
+- Do not repeat the question.
+- Do not add an introduction.
+- Keep the answer clear and concise.
+- Do not invent facts.
+- If the answer is missing, say you couldn't find enough information.
 
-    Give a short answer.
-    """
+Context:
+{context[:2000]}
 
-    result = generator(
-        prompt,
-        max_new_tokens=50
-    )
+Question:
+{question}
 
-    return result[0]["generated_text"]
+Direct answer:
+"""
+
+    try:
+        result = generator(
+            prompt,
+            max_new_tokens=120,
+            do_sample=False,
+            truncation=True
+        )
+
+        answer = result[0]["generated_text"].strip()
+
+        if not answer:
+            return "I couldn't generate an answer from the provided context."
+
+        return answer
+
+    except Exception as e:
+        print(f"Answer generation error: {e}")
+        return "Sorry, an error occurred while generating the answer."
