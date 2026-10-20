@@ -9,3 +9,4 @@ torch
 sentencepiece
 python-dotenv
 huggingface_hub
+PyMuPDF
