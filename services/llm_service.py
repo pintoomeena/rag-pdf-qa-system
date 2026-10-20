@@ -1,51 +1,30 @@
-from transformers import pipeline
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from google import genai
 
-generator = pipeline(
-    task="text2text-generation",
-    model="google/flan-t5-large",
-    framework="pt"
-)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
+def generate_answer(context: str, question: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-def generate_answer(question, context):
-    if not context or not context.strip():
-        return "I couldn't find enough information in the document."
+    client = genai.Client(api_key=api_key)
 
-    prompt = f"""
-Answer the question directly using only the provided context.
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=(
+            "Answer using only the supplied document context. "
+            "If the answer is missing, say you could not find it in the document. "
+            "Do not invent facts.\n\n"
+            f"Context:\n{context[:12000]}\n\n"
+            f"Question: {question}"
+        ),
+        config={
+            "temperature": 0.1,
+            "max_output_tokens": 300,
+        },
+    )
 
-Instructions:
-- Start immediately with the answer.
-- Do not repeat the question.
-- Do not add an introduction.
-- Keep the answer clear and concise.
-- Do not invent facts.
-- If the answer is missing, say you couldn't find enough information.
-
-Context:
-{context[:2000]}
-
-Question:
-{question}
-
-Direct answer:
-"""
-
-    try:
-        result = generator(
-            prompt,
-            max_new_tokens=120,
-            do_sample=False,
-            truncation=True
-        )
-
-        answer = result[0]["generated_text"].strip()
-
-        if not answer:
-            return "I couldn't generate an answer from the provided context."
-
-        return answer
-
-    except Exception as e:
-        print(f"Answer generation error: {e}")
-        return "Sorry, an error occurred while generating the answer."
+    return response.text or "No answer was generated."
