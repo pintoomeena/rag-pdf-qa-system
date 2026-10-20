@@ -1,51 +1,52 @@
-from transformers import pipeline
+import os
+from pathlib import Path
 
-generator = pipeline(
-    task="text2text-generation",
-    model="google/flan-t5-large",
-    framework="pt"
-)
+from dotenv import load_dotenv
+from google import genai
+
+# Load .env from the project root during local development.
+# On Render, GEMINI_API_KEY must be configured in Environment Variables.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+GEMINI_MODEL = "gemini-3.8-flash"
 
 
-def generate_answer(question, context):
+def generate_answer(context: str, question: str) -> str:
+    """Generate an answer grounded in the retrieved document context."""
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+    if not question or not question.strip():
+        raise ValueError("Question cannot be empty.")
+
     if not context or not context.strip():
-        return "I couldn't find enough information in the document."
+        return "I could not find relevant information in the document."
 
-    prompt = f"""
-Answer the question directly using only the provided context.
+    client = genai.Client(api_key=api_key)
 
-Instructions:
-- Start immediately with the answer.
-- Do not repeat the question.
-- Do not add an introduction.
-- Keep the answer clear and concise.
-- Do not invent facts.
-- If the answer is missing, say you couldn't find enough information.
+    prompt = (
+        "Answer the question using only the supplied document context. "
+        "If the context does not contain the answer, say you could not "
+        "find it in the document. Do not invent facts.\n\n"
+        f"Document context:\n{context[:12000]}\n\n"
+        f"Question: {question.strip()}"
+    )
 
-Context:
-{context[:2000]}
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+        config={
+            "temperature": 0.1,
+            "max_output_tokens": 300,
+        },
+    )
 
-Question:
-{question}
+    answer = response.text
 
-Direct answer:
-"""
+    if not answer or not answer.strip():
+        return "No answer was generated. Please try again."
 
-    try:
-        result = generator(
-            prompt,
-            max_new_tokens=120,
-            do_sample=False,
-            truncation=True
-        )
-
-        answer = result[0]["generated_text"].strip()
-
-        if not answer:
-            return "I couldn't generate an answer from the provided context."
-
-        return answer
-
-    except Exception as e:
-        print(f"Answer generation error: {e}")
-        return "Sorry, an error occurred while generating the answer."
+    return answer.strip()
